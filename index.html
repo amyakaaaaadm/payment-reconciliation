@@ -67,19 +67,6 @@
             transform: scale(1.01);
         }
         
-        .pulse-animation {
-            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-        }
-        
-        @keyframes pulse {
-            0%, 100% {
-                opacity: 1;
-            }
-            50% {
-                opacity: .7;
-            }
-        }
-        
         .log-terminal {
             background: linear-gradient(to bottom, #1a1a2e, #16213e);
             font-family: 'Courier New', monospace;
@@ -137,7 +124,6 @@
         // Google API Configuration
         const CLIENT_ID = '991123875203-41ff84qv41qg1r0q05t793aoiduiosm9.apps.googleusercontent.com';
         const SCOPES = 'https://www.googleapis.com/auth/spreadsheets';
-        const DISCOVERY_DOC = 'https://sheets.googleapis.com/$discovery/rest?version=v4';
 
         // Enhanced SVG Icons
         const Upload = () => (
@@ -198,47 +184,34 @@
             const [loading, setLoading] = useState(false);
             const [error, setError] = useState('');
             const [log, setLog] = useState([]);
-            const [gapiInited, setGapiInited] = useState(false);
-            const [gisInited, setGisInited] = useState(false);
             const [tokenClient, setTokenClient] = useState(null);
             const [accessToken, setAccessToken] = useState(null);
             const [isGoogleAuthorized, setIsGoogleAuthorized] = useState(false);
             const [exportingToSheets, setExportingToSheets] = useState(false);
 
             useEffect(() => {
-                // Initialize Google API
-                const initializeGapi = () => {
-                    gapi.load('client', async () => {
-                        await gapi.client.init({
-                            apiKey: 'AIzaSyDummy', // Not needed for OAuth
-                            discoveryDocs: [DISCOVERY_DOC],
-                        });
-                        setGapiInited(true);
-                    });
-                };
-
                 const initializeGis = () => {
-                    const client = google.accounts.oauth2.initTokenClient({
-                        client_id: CLIENT_ID,
-                        scope: SCOPES,
-                        callback: (response) => {
-                            if (response.access_token) {
-                                setAccessToken(response.access_token);
-                                setIsGoogleAuthorized(true);
-                                addLog('✓ Авторизация Google успешна');
-                            }
-                        },
-                    });
-                    setTokenClient(client);
-                    setGisInited(true);
+                    if (typeof google !== 'undefined' && google.accounts) {
+                        const client = google.accounts.oauth2.initTokenClient({
+                            client_id: CLIENT_ID,
+                            scope: SCOPES,
+                            callback: (response) => {
+                                if (response.access_token) {
+                                    setAccessToken(response.access_token);
+                                    setIsGoogleAuthorized(true);
+                                    addLog('✓ Авторизация Google успешна');
+                                }
+                            },
+                        });
+                        setTokenClient(client);
+                    }
                 };
 
-                if (typeof gapi !== 'undefined') {
-                    initializeGapi();
-                }
-
-                if (typeof google !== 'undefined') {
+                if (document.readyState === 'complete') {
                     initializeGis();
+                } else {
+                    window.addEventListener('load', initializeGis);
+                    return () => window.removeEventListener('load', initializeGis);
                 }
             }, []);
 
@@ -400,8 +373,6 @@
                     
                     const isTrip = idValue.startsWith('T-');
                     
-                    addLog(`  Строка ${rowIndex + 1}: ${idValue} (${isTrip ? 'Trip' : 'Load'}) - ${amount}`);
-                    
                     parsed.push({
                         rowIndex: rowIndex + 1,
                         idValue,
@@ -440,7 +411,6 @@
                             targetSheetName = findAmazonSheetByDate(workbook, dispatch.startDate, dispatch.endDate);
                             if (targetSheetName) {
                                 targetSheet = workbook.Sheets[targetSheetName];
-                                addLog(`  Проверяем файл: ${filename}, лист: ${targetSheetName}`);
                             }
                         }
                         
@@ -455,7 +425,6 @@
                                 foundInFile = filename;
                                 matchedRows = searchResults.map(r => `Строка ${r.rowIndex}: $${r.amount.toFixed(2)}`);
                                 amazonTotal = searchResults.reduce((sum, r) => sum + r.amount, 0);
-                                addLog(`  ✓ Найдено ${searchResults.length} результатов, сумма: $${amazonTotal.toFixed(2)}`);
                                 break;
                             }
                         }
@@ -554,9 +523,12 @@
                             },
                             sheets: [{
                                 properties: {
+                                    sheetId: 0,
                                     title: 'Результаты',
                                     gridProperties: {
-                                        frozenRowCount: 1
+                                        frozenRowCount: 1,
+                                        columnCount: 11,
+                                        rowCount: results.length + 1
                                     }
                                 }
                             }]
@@ -567,12 +539,13 @@
                     const spreadsheetId = spreadsheet.spreadsheetId;
                     addLog(`✓ Создана таблица: ${spreadsheet.properties.title}`);
 
-                    // Prepare data with formatting
+                    // Prepare header row
                     const headerRow = [
                         'Статус', 'Trip/Load ID', 'Тип', 'Дата начала', 'Дата окончания',
                         'Jabka Amount', 'Amazon Amount', 'Разница', 'Файл', 'Лист', 'Примечания'
                     ];
 
+                    // Prepare data rows
                     const dataRows = results.map(r => [
                         r.status,
                         r.idValue,
@@ -601,9 +574,9 @@
 
                     addLog('✓ Данные записаны');
 
-                    // Apply formatting
+                    // Build formatting requests
                     const requests = [
-                        // Header formatting
+                        // Header row - dark green background
                         {
                             repeatCell: {
                                 range: {
@@ -613,10 +586,10 @@
                                 },
                                 cell: {
                                     userEnteredFormat: {
-                                        backgroundColor: { red: 0.4, green: 0.49, blue: 0.91 },
+                                        backgroundColor: { red: 0.26, green: 0.52, blue: 0.4 },
                                         textFormat: {
                                             foregroundColor: { red: 1, green: 1, blue: 1 },
-                                            fontSize: 11,
+                                            fontSize: 10,
                                             bold: true
                                         },
                                         horizontalAlignment: 'CENTER',
@@ -626,30 +599,83 @@
                                 fields: 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,verticalAlignment)'
                             }
                         },
-                        // Auto-resize columns
+                        // Set row height for header
                         {
-                            autoResizeDimensions: {
-                                dimensions: {
+                            updateDimensionProperties: {
+                                range: {
                                     sheetId: 0,
-                                    dimension: 'COLUMNS',
+                                    dimension: 'ROWS',
                                     startIndex: 0,
-                                    endIndex: 11
-                                }
+                                    endIndex: 1
+                                },
+                                properties: {
+                                    pixelSize: 30
+                                },
+                                fields: 'pixelSize'
                             }
                         }
                     ];
 
-                    // Add conditional formatting for status column
+                    // Add data validation for Status column (dropdown)
+                    requests.push({
+                        setDataValidation: {
+                            range: {
+                                sheetId: 0,
+                                startRowIndex: 1,
+                                endRowIndex: results.length + 1,
+                                startColumnIndex: 0,
+                                endColumnIndex: 1
+                            },
+                            rule: {
+                                condition: {
+                                    type: 'ONE_OF_LIST',
+                                    values: [
+                                        { userEnteredValue: 'Correct' },
+                                        { userEnteredValue: 'Incorrect' },
+                                        { userEnteredValue: 'Null' }
+                                    ]
+                                },
+                                showCustomUi: true,
+                                strict: true
+                            }
+                        }
+                    });
+
+                    // Add data validation for Type column (dropdown)
+                    requests.push({
+                        setDataValidation: {
+                            range: {
+                                sheetId: 0,
+                                startRowIndex: 1,
+                                endRowIndex: results.length + 1,
+                                startColumnIndex: 2,
+                                endColumnIndex: 3
+                            },
+                            rule: {
+                                condition: {
+                                    type: 'ONE_OF_LIST',
+                                    values: [
+                                        { userEnteredValue: 'Trip' },
+                                        { userEnteredValue: 'Load' }
+                                    ]
+                                },
+                                showCustomUi: true,
+                                strict: true
+                            }
+                        }
+                    });
+
+                    // Color-code rows based on status
                     results.forEach((r, idx) => {
                         const rowIndex = idx + 1;
                         let bgColor;
                         
                         if (r.status === 'Correct') {
-                            bgColor = { red: 0.85, green: 0.95, blue: 0.85 };
+                            bgColor = { red: 0.85, green: 0.92, blue: 0.83 }; // Light green
                         } else if (r.status === 'Incorrect') {
-                            bgColor = { red: 0.95, green: 0.85, blue: 0.85 };
+                            bgColor = { red: 0.96, green: 0.80, blue: 0.80 }; // Light red
                         } else {
-                            bgColor = { red: 0.95, green: 0.95, blue: 0.95 };
+                            bgColor = { red: 0.85, green: 0.85, blue: 0.85 }; // Light gray
                         }
 
                         requests.push({
@@ -661,12 +687,70 @@
                                 },
                                 cell: {
                                     userEnteredFormat: {
-                                        backgroundColor: bgColor
+                                        backgroundColor: bgColor,
+                                        textFormat: {
+                                            fontSize: 9
+                                        }
                                     }
                                 },
-                                fields: 'userEnteredFormat.backgroundColor'
+                                fields: 'userEnteredFormat(backgroundColor,textFormat)'
                             }
                         });
+                    });
+
+                    // Auto-resize all columns
+                    requests.push({
+                        autoResizeDimensions: {
+                            dimensions: {
+                                sheetId: 0,
+                                dimension: 'COLUMNS',
+                                startIndex: 0,
+                                endIndex: 11
+                            }
+                        }
+                    });
+
+                    // Add borders to all cells
+                    requests.push({
+                        updateBorders: {
+                            range: {
+                                sheetId: 0,
+                                startRowIndex: 0,
+                                endRowIndex: results.length + 1,
+                                startColumnIndex: 0,
+                                endColumnIndex: 11
+                            },
+                            top: { 
+                                style: 'SOLID', 
+                                width: 1, 
+                                color: { red: 0.8, green: 0.8, blue: 0.8 } 
+                            },
+                            bottom: { 
+                                style: 'SOLID', 
+                                width: 1, 
+                                color: { red: 0.8, green: 0.8, blue: 0.8 } 
+                            },
+                            left: { 
+                                style: 'SOLID', 
+                                width: 1, 
+                                color: { red: 0.8, green: 0.8, blue: 0.8 } 
+                            },
+                            right: { 
+                                style: 'SOLID', 
+                                width: 1, 
+                                color: { red: 0.8, green: 0.8, blue: 0.8 } 
+                            },
+                            innerHorizontal: { 
+                                style: 'SOLID', 
+                                width: 1, 
+                                color: { red: 0.9, green: 0.9, blue: 0.9 } 
+                            },
+                            innerVertical: { 
+                                style: 'SOLID', 
+                                width: 1, 
+                                color: { red: 0.9, green: 0.9, blue: 0.9 } 
+                            }
+                        }
                     });
 
                     // Apply all formatting
@@ -770,8 +854,8 @@
                                     {!isGoogleAuthorized ? (
                                         <button
                                             onClick={handleAuthClick}
-                                            disabled={!gisInited}
-                                            className="btn-google text-white px-6 py-3 rounded-xl font-semibold shadow-lg flex items-center gap-2"
+                                            disabled={!tokenClient}
+                                            className="btn-google text-white px-6 py-3 rounded-xl font-semibold shadow-lg flex items-center gap-2 disabled:opacity-50"
                                         >
                                             <GoogleIcon className="w-5 h-5" />
                                             Войти через Google
